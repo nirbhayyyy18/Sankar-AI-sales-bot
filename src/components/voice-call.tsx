@@ -29,6 +29,70 @@ type PreparedCustomer = {
 const publicKey = process.env.NEXT_PUBLIC_VAPI_PUBLIC_KEY;
 const assistantId = process.env.NEXT_PUBLIC_VAPI_ASSISTANT_ID;
 
+type SalesStatus =
+  | "Interested"
+  | "Converted"
+  | "Follow-up Required"
+  | "Demo Requested"
+  | "Not Interested"
+  | "No Response";
+
+function inferSalesStatus(
+  entries: TranscriptEntry[],
+): SalesStatus {
+  const customerText = entries
+    .filter((entry) => entry.role === "user")
+    .map((entry) => entry.text)
+    .join(" ")
+    .toLowerCase();
+
+  if (!customerText.trim()) return "No Response";
+
+  // An explicit rejection takes priority over other positive signals.
+  if (
+    /\b(?:not interested|don't need (?:it|this)|do not need (?:it|this)|not looking for|please stop contacting|don't contact me)\b/i.test(
+      customerText,
+    )
+  ) {
+    return "Not Interested";
+  }
+
+  // A requested demo takes priority over general purchase intent.
+  if (
+    /\b(?:schedule|book|arrange|set up|request|organize)\b.{0,60}\b(?:a\s+)?(?:demo|demonstration)\b/i.test(
+      customerText,
+    ) ||
+    /\b(?:demo|demonstration)\b.{0,60}\b(?:schedule|book|arrange|set up|request)\b/i.test(
+      customerText,
+    ) ||
+    /\b(?:i'd like|i would like|i want|can i get|can we have)\b.{0,40}\b(?:a\s+)?(?:demo|demonstration)\b/i.test(
+      customerText,
+    )
+  ) {
+    return "Demo Requested";
+  }
+
+  // Mark Converted only when the customer describes a completed purchase/payment,
+  // not when they merely say they want to buy or intend to proceed.
+  if (
+    /\b(?:i have paid|i paid|already paid|payment (?:is )?completed|completed the payment|completed the purchase|purchase (?:is )?complete|i have purchased|we have purchased|purchased the subscription|subscription (?:is )?activated|i bought it|we bought it)\b/i.test(
+      customerText,
+    )
+  ) {
+    return "Converted";
+  }
+
+  if (
+    /\b(?:interested|want to purchase|want to buy|proceed with the deal|sign me up|i'd like to subscribe|i would like to subscribe)\b/i.test(
+      customerText,
+    )
+  ) {
+    return "Interested";
+  }
+
+  return "Follow-up Required";
+}
+
 export default function VoiceCall() {
   const vapiRef = useRef<Vapi | null>(null);
   const transcriptRef = useRef<TranscriptEntry[]>([]);
@@ -77,10 +141,7 @@ export default function VoiceCall() {
             customerName: customerNameRef.current,
             date: new Date().toISOString(),
             duration,
-            status:
-              savedTranscript.length > 0
-                ? "Follow-up Required"
-                : "No Response",
+            status: inferSalesStatus(savedTranscript),
             transcript: savedTranscript,
             summary:
               savedTranscript.length > 0
